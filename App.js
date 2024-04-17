@@ -1,19 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Appearance } from 'react-native';
-import { Dimensions, StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
+import {
+  Dimensions,
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Alert,
+  Animated,
+} from 'react-native';
 import { ThemeProvider } from 'styled-components';
 import { light, dark } from './colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BouncyCheckbox from 'react-native-bouncy-checkbox';
 import { AntDesign, Feather, EvilIcons } from '@expo/vector-icons';
+import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function App() {
   const screenHeight = Dimensions.get('window').height; // 사용자의 디바이스의 전체 화면 높이를 가져옴
-  const screenWidth = Dimensions.get('window').width;
+  const SCREEN_WIDTH = Dimensions.get('window').width;
   const STORAGE_KEY = '@todos';
   const [loading, setLoading] = useState(true); //loading중
   const [userName, setUserName] = useState('');
+  const [checkedCount, setCheckedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const checkedWidth = totalCount === 0 ? 0 : (checkedCount / totalCount) * 100 + '%';
+  const uncheckedWidth =
+    totalCount === 0 ? '100%' : ((totalCount - checkedCount) / totalCount) * 100 - (20.3 / SCREEN_WIDTH) * 100 + '%';
+
+  const renderRightActions = (dragX, key) => {
+    const scale = dragX.interpolate({
+      inputRange: [-50, 0],
+      outputRange: [0, 0],
+    });
+    return (
+      <Animated.View>
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: 'red',
+            justifyContent: 'center',
+            alignItems: 'flex-end',
+            paddingRight: 20,
+            paddingVertical: 10,
+            paddingHorizontal: 20,
+            marginTop: 10,
+            //backgroundColor: appTheme.container, // Theme container color
+            borderRadius: 10,
+            height: 55,
+          }}
+          onPress={() => deleteTodo(key)}
+        >
+          <Feather name="trash-2" size={24} color="white" />
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
 
   const changeUserName = () => {
     Alert.prompt(
@@ -58,15 +103,27 @@ export default function App() {
     loadtodo();
     loadUserName();
     return () => subscription.remove(); // 컴포넌트 언마운트 시 리스너 제거
-  }, [userName]);
+  }, [userName, todos]);
 
   //!사용자가 체크박스 누를 때마다 checked 변경
   const toggleCheckbox = (key) => {
-    const newToDos = {
-      ...todos,
-      [key]: { ...todos[key], checked: !todos[key].checked },
-    };
-    Savetodos(newToDos);
+    const currentTodo = todos[key];
+    const newCheckedStatus = !currentTodo.checked;
+
+    // 현재 todos에서 변경 대상 todo를 제외한 나머지로 새 객체를 생성합니다.
+    const { [key]: removed, ...remainingTodos } = todos;
+
+    let newTodos;
+    if (newCheckedStatus) {
+      // 체크 상태가 true가 되면, 배열의 맨 뒤로 이동
+      newTodos = { ...remainingTodos, [key]: { ...currentTodo, checked: newCheckedStatus } };
+    } else {
+      // 체크 상태가 false가 되면, 배열의 맨 앞으로 이동
+      newTodos = { [key]: { ...currentTodo, checked: newCheckedStatus }, ...remainingTodos };
+    }
+
+    // 변경된 todos 객체를 저장하는 함수를 호출합니다.
+    Savetodos(newTodos);
   };
 
   //!사용자가 x 누르면 todos 배열을 해당 todo key를 지운 배열로 update (상태 변경 동기화해서 그냥 원래 배열에서 key 지우면
@@ -76,11 +133,12 @@ export default function App() {
       {
         text: '녜...😿',
         onPress: async () => {
-          const newTodo = { ...todos };
-          delete newTodo[key];
-          setTodos(newTodo);
-          await Savetodos(newTodo);
-          Alert.alert('삭제되었어요...😿');
+          setTodos((prevTodos) => {
+            const newTodos = { ...prevTodos };
+            delete newTodos[key];
+            Alert.alert('삭제되었어요...😿');
+            return newTodos; // 먼저 상태를 업데이트
+          });
         },
       },
       {
@@ -91,7 +149,6 @@ export default function App() {
         },
       },
     ]);
-    return;
   };
 
   //!-------작업 페이지, 여행 페이지 설정---------
@@ -122,9 +179,20 @@ export default function App() {
   const loadtodo = async () => {
     try {
       const s = await AsyncStorage.getItem(STORAGE_KEY);
-      s === null ? setTodos({}) : setTodos(JSON.parse(s));
+      if (s) {
+        const todos = JSON.parse(s);
+        setTodos(todos);
+        const total = Object.keys(todos).length;
+        const checked = Object.values(todos).filter((todo) => todo.checked).length;
+        setTotalCount(total);
+        setCheckedCount(checked);
+      } else {
+        setTodos({});
+        setTotalCount(0);
+        setCheckedCount(0);
+      }
       setLoading(false);
-    } catch {
+    } catch (e) {
       alert('저장소를 읽어들이는 데 실패했습니다');
     }
   };
@@ -150,15 +218,16 @@ export default function App() {
   return (
     <ThemeProvider theme={appTheme}>
       {loading ? (
-        <AntDesign
-          name="loading1"
-          size={24}
-          color={appTheme.container}
-          style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-        />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text>🐈</Text>
+          <AntDesign name="loading1" size={24} color="black" />
+          <Text style={{ color: appTheme === light ? dark.bg : light.bg, marginTop: 5 }}>
+            꽁꽁 얼어붙은 로딩 위로 고양이가 걸어다닙니댜
+          </Text>
+        </View>
       ) : (
         <View style={[styles.container, { paddingTop: screenHeight * 0.04, backgroundColor: appTheme.bg }]}>
-          <StatusBar style="auto" />
+          <StatusBar style={appTheme === light ? 'dark' : 'light'} />
           <View style={styles.header}>
             <TouchableOpacity onPress={work}>
               <Text style={{ ...styles.btnTxt, color: working ? appTheme.blue : appTheme.grey }}>작업 📚</Text>
@@ -192,44 +261,67 @@ export default function App() {
               </TouchableOpacity>
             </Text>
           )}
-
+          <View style={styles.progressBarContainer}>
+            <View style={[styles.progressBar, { backgroundColor: appTheme.blue, width: checkedWidth }]} />
+            <Text
+              style={[
+                styles.progressBar,
+                { lignSelf: 'center', backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey' },
+              ]}
+            >
+              🐈
+            </Text>
+            <View
+              style={[
+                styles.progressBar,
+                { backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey', width: uncheckedWidth },
+              ]}
+            />
+          </View>
           <ScrollView>
             {Object.keys(todos).map((key) =>
               //사용자가 작업을 누르고 작성하면 그 때 working은 작업이라서 hashmap에 working이 작업으로 들어감
               //여기서 todolist를 보여줄 때 현재 있는 테마랑 같으면 보여주고 아니면 보여주지 마라
               //=>working이면 working만 보여줌
               todos[key].working === working ? (
-                <View key={key} style={{ ...styles.todo, backgroundColor: appTheme.container }}>
-                  <BouncyCheckbox
-                    isChecked={todos[key].checked}
-                    onPress={() => toggleCheckbox(key)}
-                    size={20}
-                    fillColor={appTheme === light ? '#4287F5' : '#E3AC00'}
-                    unfillColor="#FFFFFF"
-                    iconStyle={{
-                      borderRadius: 0,
-                      marginRight: -16,
-                    }}
-                    innerIconStyle={{
-                      borderRadius: 0, // to make it a little round increase the value accordingly
-                    }}
-                  />
-                  <Text
-                    style={{
-                      flex: 1,
-                      textDecorationLine: todos[key].checked ? 'line-through' : 'none',
-                      color: light.bg,
-                      fontSize: 16,
-                      fontWeight: '500',
-                      textAlign: 'center',
-                    }}
-                  >
-                    {todos[key].input}
-                  </Text>
-                  <TouchableOpacity onPress={() => deleteTodo(key)}>
-                    <Feather name="trash-2" size={18} color={light.bg} />
-                  </TouchableOpacity>
-                </View>
+                <GestureHandlerRootView style={{ flex: 1 }} key={key}>
+                  <Swipeable renderRightActions={(dragX, key) => renderRightActions(dragX, key)}>
+                    <View
+                      style={{
+                        ...styles.todo,
+                        backgroundColor: todos[key].checked === true ? appTheme.grey : appTheme.container,
+                        overflow: 'hidden', // 내부 요소가 경계를 넘어서지 않도록 설정
+                      }}
+                    >
+                      <BouncyCheckbox
+                        isChecked={todos[key].checked}
+                        onPress={() => toggleCheckbox(key)}
+                        size={20}
+                        fillColor={appTheme === light ? '#4287F5' : '#E3AC00'}
+                        unfillColor="#FFFFFF"
+                        iconStyle={{
+                          borderRadius: 0,
+                          marginRight: -16,
+                        }}
+                        innerIconStyle={{
+                          borderRadius: 0, // to make it a little round increase the value accordingly
+                        }}
+                      />
+                      <Text
+                        style={{
+                          flex: 1,
+                          textDecorationLine: todos[key].checked ? 'line-through' : 'none',
+                          color: light.bg,
+                          fontSize: 16,
+                          fontWeight: '500',
+                          textAlign: 'center',
+                        }}
+                      >
+                        {todos[key].input}
+                      </Text>
+                    </View>
+                  </Swipeable>
+                </GestureHandlerRootView>
               ) : null
             )}
           </ScrollView>
@@ -243,6 +335,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 20,
+    marginTop: StatusBar.currentHeight || 0,
   },
   header: {
     paddingTop: 20,
@@ -260,6 +353,16 @@ const styles = StyleSheet.create({
 
     fontSize: 18,
     marginBottom: 20,
+  },
+  progressBarContainer: {
+    marginTop: 10,
+    marginBottom: 8,
+    flexDirection: 'row',
+    height: 20,
+    borderRadius: 20,
+  },
+  progressBar: {
+    height: '100%',
   },
   todo: {
     flexDirection: 'row',
