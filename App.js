@@ -18,19 +18,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import BouncyCheckbox from 'react-native-bouncy-checkbox';
 import { AntDesign, Feather, EvilIcons } from '@expo/vector-icons';
 import { Swipeable, GestureHandlerRootView } from 'react-native-gesture-handler';
-
+//todo 페이지 분리해서 완료된 todo만 모아서 볼 수 있는 곳도 만들기
 export default function App() {
   const screenHeight = Dimensions.get('window').height; // 사용자의 디바이스의 전체 화면 높이를 가져옴
   const SCREEN_WIDTH = Dimensions.get('window').width;
   const STORAGE_KEY = '@todos';
   const [loading, setLoading] = useState(true); //loading중
   const [userName, setUserName] = useState('');
-  const [checkedCount, setCheckedCount] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const checkedWidth = totalCount === 0 ? 0 : (checkedCount / totalCount) * 100 + '%';
-  const uncheckedWidth =
-    totalCount === 0 ? '100%' : ((totalCount - checkedCount) / totalCount) * 100 - (20.3 / SCREEN_WIDTH) * 100 + '%';
+  const [workcheckedCount, worksetCheckedCount] = useState(0);
+  const [worktotalCount, worksetTotalCount] = useState(0);
+  const [tripcheckedCount, tripsetCheckedCount] = useState(0);
+  const [triptotalCount, tripsetTotalCount] = useState(0);
+  const [todos, setTodos] = useState({});
+  const workcheckedWidth = worktotalCount === 0 ? 0 : (workcheckedCount / worktotalCount) * 100 + '%';
+  const workuncheckedWidth =
+    worktotalCount === 0 ? '100%' : ((worktotalCount - workcheckedCount) / worktotalCount) * 100 + '%';
+  const tripcheckedWidth = triptotalCount === 0 ? 0 : (tripcheckedCount / triptotalCount) * 100 + '%';
+  const tripuncheckedWidth =
+    triptotalCount === 0 ? '100%' : ((triptotalCount - tripcheckedCount) / triptotalCount) * 100 + '%';
 
+  //! -------------------------delete todo---------------------------
   const renderRightActions = (dragX, key) => {
     const scale = dragX.interpolate({
       inputRange: [-50, 0],
@@ -52,6 +59,7 @@ export default function App() {
             borderRadius: 10,
             height: 55,
           }}
+          //outer scope
           onPress={() => deleteTodo(key)}
         >
           <Feather name="trash-2" size={24} color="white" />
@@ -59,7 +67,30 @@ export default function App() {
       </Animated.View>
     );
   };
-
+  //사용자가 x 누르면 todos 배열을 해당 todo key를 지운 배열로 update (상태 변경 동기화해서 그냥 원래 배열에서 key 지우면
+  // 얘네는 바뀐 걸 모름. 무조건 새로운 배열 자체를 만들어서 다시 넣어줘야)
+  const deleteTodo = (key) => {
+    Alert.alert('삭제하시나요?', '정말로요?😿', [
+      {
+        text: '녜...😿',
+        onPress: async () => {
+          const newTodos = { ...todos };
+          delete newTodos[key]; // 먼저 todo를 삭제합니다.
+          await Savetodos(newTodos); // 먼저 저장하고 상태를 업데이트
+          setTodos(newTodos);
+          Alert.alert('삭제되었어요...😿');
+        },
+      },
+      {
+        text: '아니용😸',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('야호~😻');
+        },
+      },
+    ]);
+  };
+  //!----------------------change name----------------------------------------
   const changeUserName = () => {
     Alert.prompt(
       '이름 입력', // 타이틀
@@ -81,7 +112,8 @@ export default function App() {
     );
   };
 
-  //!---사용자가 테마 변경할 때마다 랜더링 ===>사용자의 테마에 따라서 어플의 테마 변경-----
+  //!---사용자가 이름 바꿀 때 요청 받아서 다시 설정, 앱 다시 실행할 때마다 시스템 테마 변경 보고
+  //!dark모드, light mode 분리-----
 
   const [appTheme, setAppTheme] = useState(light);
 
@@ -89,8 +121,9 @@ export default function App() {
     const subscription = Appearance.addChangeListener(({ colorScheme }) => {
       setAppTheme(colorScheme === 'dark' ? dark : light); // 시스템 테마 변경 감지
     });
-    const loadUserName = async () => {
+    const init = async () => {
       const storedUserName = await AsyncStorage.getItem('userName');
+      const storedState = await AsyncStorage.getItem('@current_page');
       if (storedUserName) {
         setUserName(storedUserName);
       } else {
@@ -99,11 +132,30 @@ export default function App() {
           changeUserName();
         }
       }
+      if (storedState) {
+        setWorking(JSON.parse(storedState));
+      }
+      loadtodo();
     };
-    loadtodo();
-    loadUserName();
+    init();
     return () => subscription.remove(); // 컴포넌트 언마운트 시 리스너 제거
-  }, [userName, todos]);
+  }, [userName]);
+
+  //!작업, 여행 페이지에서 check 갯수에 따라 진행바 조정
+  useEffect(() => {
+    const workingTodos = Object.values(todos).filter((todo) => todo.working === true);
+    const travelTodos = Object.values(todos).filter((todo) => todo.working === false);
+
+    const worktotal = workingTodos.length;
+    const workchecked = workingTodos.filter((todo) => todo.checked).length;
+    worksetTotalCount(worktotal);
+    worksetCheckedCount(workchecked);
+
+    const travelTotal = travelTodos.length;
+    const travelChecked = travelTodos.filter((todo) => todo.checked).length;
+    tripsetTotalCount(travelTotal);
+    tripsetCheckedCount(travelChecked);
+  }, [todos]);
 
   //!사용자가 체크박스 누를 때마다 checked 변경
   const toggleCheckbox = (key) => {
@@ -126,36 +178,6 @@ export default function App() {
     Savetodos(newTodos);
   };
 
-  //!사용자가 x 누르면 todos 배열을 해당 todo key를 지운 배열로 update (상태 변경 동기화해서 그냥 원래 배열에서 key 지우면
-  //! 얘네는 바뀐 걸 모름. 무조건 새로운 배열 자체를 만들어서 다시 넣어줘야)
-  const deleteTodo = (key) => {
-    Alert.alert('삭제하시나요?', '정말로요?😿', [
-      {
-        text: '녜...😿',
-        onPress: async () => {
-          setTodos((prevTodos) => {
-            const newTodos = { ...prevTodos };
-            delete newTodos[key];
-            Alert.alert('삭제되었어요...😿');
-            return newTodos; // 먼저 상태를 업데이트
-          });
-        },
-      },
-      {
-        text: '아니용😸',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('야호~😻');
-        },
-      },
-    ]);
-  };
-
-  //!-------작업 페이지, 여행 페이지 설정---------
-  const [working, setWorking] = useState(true);
-  const travel = () => setWorking(false);
-  const work = () => setWorking(true);
-
   //!-----사용자가 텍스트 작성할 때마다 받아서 input에 저장해두기------------
   const [input, setInput] = useState('');
   const onChangeText = (payload) => setInput(payload);
@@ -172,7 +194,6 @@ export default function App() {
       alert('저장에 실패했습니다');
     }
   };
-
   //!로컬 저장소에서 todo list를 가져온다.
   //string으로 저장했기 때문에 얘네를 다시 object로 바꿔줘야 함
   //사용자가 이전에 입력한 게 없다면 s가 null이라서 parse 불가! =>null이면 따로 setting해주어야 한다
@@ -182,23 +203,32 @@ export default function App() {
       if (s) {
         const todos = JSON.parse(s);
         setTodos(todos);
-        const total = Object.keys(todos).length;
-        const checked = Object.values(todos).filter((todo) => todo.checked).length;
-        setTotalCount(total);
-        setCheckedCount(checked);
       } else {
         setTodos({});
-        setTotalCount(0);
-        setCheckedCount(0);
       }
       setLoading(false);
     } catch (e) {
       alert('저장소를 읽어들이는 데 실패했습니다');
+      setTodos({});
+    }
+  };
+
+  //!-------작업 페이지, 여행 페이지 설정---------
+  const [working, setWorking] = useState(true);
+  const travel = () => savestate(false);
+  const work = () => savestate(true);
+
+  const savestate = async (state) => {
+    setWorking(state);
+    try {
+      await AsyncStorage.setItem('@current_page', JSON.stringify(state)); // Save state to AsyncStorage
+    } catch (e) {
+      console.error('Failed to save the page state:', e);
     }
   };
 
   //!-----------사용자가 전송 누르면 지금까지 쌓았던 input을 todos hashmap에 저장하기----------
-  const [todos, setTodos] = useState({});
+
   //local 저장소에 계속 동기화해야 하기 때문에 async
   const addToDo = async () => {
     if (input === '') return;
@@ -261,23 +291,30 @@ export default function App() {
               </TouchableOpacity>
             </Text>
           )}
-          <View style={styles.progressBarContainer}>
-            <View style={[styles.progressBar, { backgroundColor: appTheme.blue, width: checkedWidth }]} />
-            <Text
-              style={[
-                styles.progressBar,
-                { lignSelf: 'center', backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey' },
-              ]}
-            >
-              🐈
-            </Text>
-            <View
-              style={[
-                styles.progressBar,
-                { backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey', width: uncheckedWidth },
-              ]}
-            />
-          </View>
+          {working ? (
+            <View style={styles.progressBarContainer}>
+              <View style={[styles.progressBar, { backgroundColor: appTheme.blue, width: workcheckedWidth }]} />
+
+              <View
+                style={[
+                  styles.progressBar,
+                  { backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey', width: workuncheckedWidth },
+                ]}
+              />
+            </View>
+          ) : (
+            <View style={styles.progressBarContainer}>
+              <View style={[styles.progressBar, { backgroundColor: appTheme.blue, width: tripcheckedWidth }]} />
+
+              <View
+                style={[
+                  styles.progressBar,
+                  { backgroundColor: appTheme === light ? 'lightgrey' : 'darkgrey', width: tripuncheckedWidth },
+                ]}
+              />
+            </View>
+          )}
+
           <ScrollView>
             {Object.keys(todos).map((key) =>
               //사용자가 작업을 누르고 작성하면 그 때 working은 작업이라서 hashmap에 working이 작업으로 들어감
@@ -285,7 +322,7 @@ export default function App() {
               //=>working이면 working만 보여줌
               todos[key].working === working ? (
                 <GestureHandlerRootView style={{ flex: 1 }} key={key}>
-                  <Swipeable renderRightActions={(dragX, key) => renderRightActions(dragX, key)}>
+                  <Swipeable renderRightActions={(dragX) => renderRightActions(dragX, key)}>
                     <View
                       style={{
                         ...styles.todo,
